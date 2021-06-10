@@ -1,0 +1,9 @@
+alerts_index: aminer-alerts*
+deltas:
+- 0.5
+- 5
+hosts: #{ELASTIC_IP}:{PORT}
+query_interval: 30
+search_after:
+- 0
+storage: true
