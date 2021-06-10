@@ -14,7 +14,7 @@ The `config.yaml` file contains the configuration variables for the generator:
 - deltas:
     - 0.5
     - 5
-- hosts: localhost:9200 # IP and PORT of the elasticsearch search containing alerts
+- hosts: localhost:9200 # IP and PORT of the elasticsearch instance (for querying and saving)
 - query_interval: 30 # how often to query Elasticsearch for alerts
 - search_after: # point-in-time for aminer alerts query
     - 0
