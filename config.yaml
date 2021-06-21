@@ -2,7 +2,7 @@ alerts_index: aminer-alerts*
 deltas:
 - 0.5
 - 5
-hosts: #{ELASTIC_IP}:{PORT}
+hosts: localhost:9200
 query_interval: 30
 search_after:
 - 0

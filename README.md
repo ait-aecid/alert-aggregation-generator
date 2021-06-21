@@ -2,7 +2,7 @@
 
 ## Requirements
 
-* alertaggregation module, installed or placed in the same folder as the generator script, i.e. withing the alert-aggregation-service directory
+* alertaggregation package, installed or placed in the same folder as the generator script, i.e. within the alert-aggregation-service directory. Note that `alertaggregation` is a *package*, meaning that the main folder and every subfolder **must** contain an empty `__init__.py` module for the imports to work.
 * elasticsearch >= 7.10.1
 * yaml
 
