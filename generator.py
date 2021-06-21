@@ -267,11 +267,12 @@ class MetaAlertGenerator(Elasticsearch):
                 size=self.query_size,
             )
 
+            meta_alerts = data['hits']['hits']
+
             if '_scroll_id' in data.keys():
                 # Get the scroll ID
                 scroll_id = data['_scroll_id']
                 scroll_size = len(data['hits']['hits'])
-                meta_alerts = data['hits']['hits']
                 total_hits = data['hits']['total']['value']
                 
                 while scroll_size > 0:
@@ -283,8 +284,7 @@ class MetaAlertGenerator(Elasticsearch):
                     scroll_id = data['_scroll_id']
                     scroll_size = len(data['hits']['hits'])
                     meta_alerts.extend(data['hits']['hits'])
-
-                self.clear_scroll({"scroll_id": scroll_id})
+            self.clear_scroll({"scroll_id": scroll_id})
         self.printout(f"Found {len(meta_alerts)} existing Meta-Alerts")
         return meta_alerts
 
