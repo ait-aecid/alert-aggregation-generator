@@ -10,7 +10,6 @@ import datetime
 from elasticsearch import Elasticsearch, helpers as es_helpers
 from alertaggregation.preprocessing.objects import Alert
 from alertaggregation.preprocessing import label
-from alertaggregation.preprocessing.read_input import preprocess_alerts
 from alertaggregation.clustering import time_delta_group, objects as clustering_objects
 from alertaggregation.similarity import similarity
 from alertaggregation.merging.objects import (MetaAlert, MetaAlertManager, KnowledgeBase, Wildcard, Mergelist)
@@ -140,8 +139,7 @@ class MetaAlertGenerator(Elasticsearch):
             self.generate_meta_alerts(delta_groups)
             # get generated alerts, alert-groups and meta-alerts
             alert_counter = itertools.count()
-
-            delta = list(self.kb.delta_dict.keys())[0]
+            
             self.g_alerts = [{
                 '_index': self.g_alerts_daily_index,
                 '_source': {
@@ -152,7 +150,7 @@ class MetaAlertGenerator(Elasticsearch):
                     "groups": alert.groups_id,
                     "meta_alerts": alert.meta_alerts_id,
                 }
-            } for group in self.kb.delta_dict[delta] for alert in group.alerts]
+            } for delta, groups in self.kb.delta_dict.items() for group in groups for alert in group.alerts]
 
             self.g_alert_groups = [{
                 '_index': self.g_alert_groups_daily_index,
@@ -160,11 +158,11 @@ class MetaAlertGenerator(Elasticsearch):
                     "@timestamp": self.frozen_timestamp,
                     "id": group.id, 
                     "meta_alert_id": group.meta_alert.id,
-                    "delta": d,
+                    "delta": delta,
                     "alerts": [self.serialize_alert(alert) for alert in group.alerts],
                     "alert_count": len(group.alerts),
                 }
-            } for d, groups in delta_groups.items() for group in groups]
+            } for delta, groups in self.kb.delta_dict.items() for group in groups]
 
             # add alert_ids into g_groups
             for group in self.g_alert_groups:
@@ -284,7 +282,7 @@ class MetaAlertGenerator(Elasticsearch):
                     scroll_id = data['_scroll_id']
                     scroll_size = len(data['hits']['hits'])
                     meta_alerts.extend(data['hits']['hits'])
-            self.clear_scroll({"scroll_id": scroll_id})
+                self.clear_scroll({"scroll_id": scroll_id})
         self.printout(f"Found {len(meta_alerts)} existing Meta-Alerts")
         return meta_alerts
 
@@ -314,13 +312,14 @@ class MetaAlertGenerator(Elasticsearch):
                     min_key_occurrence=self.min_key_occurrence, 
                     min_val_occurrence=self.min_val_occurrence
                 )
+                group.meta_alert = ma_obj
                 ma_obj.alert_group = group
                 delta = meta_alert['delta']
                 if delta in manager_meta_alerts:
                     manager_meta_alerts[delta].append(ma_obj)
                 else:
                     manager_meta_alerts[delta] = [ma_obj]
-                self.kb.add_group_delta(group, delta)
+                self.kb.add_group_delta(group, delta) # use to update groups in KB
 
             self.manager.meta_alerts = manager_meta_alerts
             if manager_meta_alerts.keys():
@@ -515,14 +514,11 @@ class MetaAlertGenerator(Elasticsearch):
             })
 
             hits = data['hits']['hits']
-            print(hits)
             if hits:
                 last_stat = hits[0]
                 alert_count = alert_count - last_stat['_source']['alert_count']
                 group_count = group_count - last_stat['_source']['group_count']
                 meta_count = meta_count - last_stat['_source']['meta_count']
-
-                print(alert_count)
 
         body = {
             '@timestamp': self.frozen_timestamp,
