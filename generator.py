@@ -110,12 +110,16 @@ class MetaAlertGenerator(Elasticsearch):
         self.has_processed = False
         self.frozen_timestamp = None
 
-        # set last IDs of alert-groups and meta-alerts
-        self.set_last_group_id()
-        meta_alerts = self.fetch_meta_alerts()
+        meta_alerts = self.scroll_all(self.g_meta_alerts_index)
         if meta_alerts:
-            self.set_last_meta_alert_id(meta_alerts)
+            self.set_last_id(meta_alerts, MetaAlert)
             self.update_manager(meta_alerts) # update meta-alert manager ONLY ONCE on start
+
+        alert_groups = self.scroll_all(self.g_alert_groups_index)
+        if alert_groups:
+            self.set_last_id(alert_groups, clustering_objects.Group)
+            self.update_kb(alert_groups)
+
 
         if not self.local:   
             while self.running:
@@ -130,7 +134,7 @@ class MetaAlertGenerator(Elasticsearch):
 
                 self.process_and_save(delta_groups)
                 self.has_processed = True
-                self.printout(f"Going to sleep for {self.query_interval} second(s) b4 the next query...")
+                self.printout(f"Sleeping {self.query_interval} seconds b4 the next query...")
                 time.sleep(int(self.query_interval))
                 
 
@@ -187,13 +191,12 @@ class MetaAlertGenerator(Elasticsearch):
                         else:
                             meta['_source']['group_ids'] = [(group_id, alert_ids)]
 
-            self.save_stats()
-
             self.printout('Results:')
             for delta, meta_alerts in self.manager.meta_alerts.items():
                 self.printout(' delta = ' + str(delta) + ': ' + str(len(meta_alerts)) + ' meta-alerts')    
 
             if self.storage:
+                self.save_stats()
                 # delete old alerts, alert-groups, meta-alerts and save the new/updated ones
                 self.delete_by_query(index=self.g_alerts_index, body={"query": {"match_all": {}}})
                 self.delete_by_query(index=self.g_alert_groups_index, body={"query": {"match_all": {}}})
@@ -255,36 +258,72 @@ class MetaAlertGenerator(Elasticsearch):
             pit_closed = self.close_point_in_time({"id": pit_id})
             return hits
 
-    def fetch_meta_alerts(self): 
-        index_exists = self.indices.exists(self.g_meta_alerts_index)
-        meta_alerts = []
+    def scroll_all(self, index): 
+        index_exists = self.indices.exists(index)
+        hits = []
         if index_exists:
             data = self.search(
-                index=self.g_meta_alerts_index, 
+                index=index, 
                 scroll=self.keep_alive,
                 size=self.query_size,
             )
 
-            meta_alerts = data['hits']['hits']
+            hits = data['hits']['hits']
+
+            qcounter = 0
 
             if '_scroll_id' in data.keys():
                 # Get the scroll ID
                 scroll_id = data['_scroll_id']
                 scroll_size = len(data['hits']['hits'])
-                total_hits = data['hits']['total']['value']
                 
                 while scroll_size > 0:
-                    self.printout("Querying meta-alerts...")
+                    self.printout(f"Querying objects from {index} ({qcounter})")
                     data = self.scroll(
                         scroll_id=scroll_id, 
                         scroll=self.keep_alive, 
                     )
                     scroll_id = data['_scroll_id']
                     scroll_size = len(data['hits']['hits'])
-                    meta_alerts.extend(data['hits']['hits'])
+                    hits.extend(data['hits']['hits'])
+                    qcounter += 1
+
                 self.clear_scroll({"scroll_id": scroll_id})
-        self.printout(f"Found {len(meta_alerts)} existing Meta-Alerts")
-        return meta_alerts
+        self.printout(f"Found {len(hits)} existing objects")
+        return hits
+
+    def update_kb(self, groups):
+        if groups:
+            for group in groups:
+                if '_source' in group.keys():
+                    group = group['_source']
+
+                alerts = []
+                for alert in group['alerts']:
+                    alert = self.deserialize_alert(alert)
+                    alert = Alert(alert)
+                    alert.meta_alerts_id.append(group["meta_alert_id"])
+                    alert.groups_id.append(group['id'])
+                    alerts.append(alert)
+
+                group_obj = clustering_objects.Group()
+                group_obj.add_to_group(alerts)
+                group_obj.create_bag_of_alerts(
+                    self.min_alert_match_similarity, 
+                    max_val_limit=self.max_val_limit, 
+                    min_key_occurrence=self.min_key_occurrence, 
+                    min_val_occurrence=self.min_val_occurrence
+                )
+                group_obj.id = group['id']
+                group_obj.delta = group['delta']
+
+                ma_obj = None
+                for delta, meta_alerts in self.manager.meta_alerts.items():
+                    for meta_alert in meta_alerts:
+                        if meta_alert.id == group["meta_alert_id"]:
+                            ma_obj = meta_alert
+                group_obj.meta_alert = ma_obj
+                self.kb.add_group_delta(group_obj, group_obj.delta)
 
     def update_manager(self, meta_alerts): 
         # add es meta_alerts to the manager
@@ -295,31 +334,31 @@ class MetaAlertGenerator(Elasticsearch):
                     meta_alert = meta_alert['_source']
                 ma_obj = MetaAlert(self.manager)
                 ma_obj.id = meta_alert['id']
-                alert_group = []
 
+                group_alerts = []
                 # decode wildcard and mergelist!
-                for group in meta_alert['alert_group']:
-                    alert = self.deserialize_alert(group['alert'])
+                for alert in meta_alert['alert_group']:
+                    alert = self.deserialize_alert(alert['alert'])
                     alert = Alert(alert)
                     alert.meta_alerts_id.append(ma_obj.id)
-                    alert_group.append(alert)
+                    group_alerts.append(alert)
 
                 group = clustering_objects.Group()
-                group.add_to_group(alert_group)
+                group.add_to_group(group_alerts)
                 group.create_bag_of_alerts(
                     self.min_alert_match_similarity, 
                     max_val_limit=self.max_val_limit, 
                     min_key_occurrence=self.min_key_occurrence, 
                     min_val_occurrence=self.min_val_occurrence
                 )
-                group.meta_alert = ma_obj
+                # group.meta_alert = ma_obj
                 ma_obj.alert_group = group
                 delta = meta_alert['delta']
                 if delta in manager_meta_alerts:
                     manager_meta_alerts[delta].append(ma_obj)
                 else:
                     manager_meta_alerts[delta] = [ma_obj]
-                self.kb.add_group_delta(group, delta) # use to update groups in KB
+                # self.kb.add_group_delta(group, delta)
 
             self.manager.meta_alerts = manager_meta_alerts
             if manager_meta_alerts.keys():
@@ -504,9 +543,8 @@ class MetaAlertGenerator(Elasticsearch):
         alert_count = len(self.g_alerts)
         group_count = len(self.g_alert_groups)
         meta_count = len(self.g_meta_alerts)
-        index_exists = self.indices.exists(index)
-
-        if index_exists and self.has_processed:
+        index_exists = self.indices.exists('generator-stats*')
+        if index_exists:
             data = self.search(index=index, body={
                 "size": 1,
                 "sort": {"@timestamp": "desc"},
@@ -568,6 +606,17 @@ class MetaAlertGenerator(Elasticsearch):
                             alert[k] = ml
         loop_dict(alert)
         return alert
+
+    def set_last_id(self, objs, kls):
+        if objs:
+            last_id = None
+            if '_source' in objs[0].keys():
+                last_id = max([obj['_source']['id'] for obj in objs])
+            else:
+                last_id = max([obj['id'] for obj in objs])
+
+            if last_id:
+                kls.id_iter = itertools.count(start=int(last_id)+1)
 
     def set_last_group_id(self):
         last_group_id = None
