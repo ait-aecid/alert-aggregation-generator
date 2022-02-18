@@ -1,22 +1,28 @@
 # Meta-Alert Generator for AMiner
 
-## Requirements
+## Dependencies
 
-* alertaggregation package, installed or placed in the same folder as the generator script, i.e. within the alert-aggregation-service directory. Note that `alertaggregation` is a *package*, meaning that the main folder and every subfolder **must** contain an empty `__init__.py` module for the imports to work.
-* elasticsearch >= 7.10.1
-* yaml
+* elasticsearch>=7.0.0,<8.0.0
+* pyyaml
+* alertaggregation
+
+Run `pip install -r requirements.txt` to install the dependencies.
+
+Note: The alertaggregation modules *must* be placed inside a folder name `alertaggregation`. Moreover, it should also be a `package`, i.e., every folder and subfolder must contain an empty `__init__.py` module.
 
 ## Configuration
 
-The `config.yaml` file contains the configuration variables for the generator:
+The `config.yaml` file contains the configuration variables for the generator and alertaggregation library:
 
-- alerts_index: aminer-alerts* # index of the aminer anomalies
-- deltas:
-    - 0.5
-    - 5
-- hosts: localhost:9200 # IP and PORT of the elasticsearch instance (for querying and saving)
-- query_interval: 30 # how often to query Elasticsearch for alerts
-- search_after: # point-in-time for aminer alerts query
-    - 0
-- storage: true # save generated meta-alerts to ELASTIC
-- local: false # In case the anomalies are to be processed from local sources
+- alert_index:  index of the aminer anomalies
+- hosts: IP (and PORT) of the elasticsearch instance (for querying and saving)
+- query_interval: how often to query elasticsearch for alerts
+- search_after: point-in-time for aminer alerts query. The value in the file is updated automatically after every query. Change it to 0 only when you want to query all the anomalies in the db.
+- storage: True => Save generated meta-alerts to elasticsearch; False => only display
+- deltas: alertaggregation parameter
+
+## How the generator works
+
+After running `generator.py`, the generator queries for aminer anomalies in the given elasticsearch instance. If it does not find anything, it waits a defined period (query_interval) and then queries again. When it find anomalies, it processes them to generate alert-groups and meta-alerts.
+
+In case you have local anomalies (e.g., in a file), you can process them too by putting them as a JSON list in the `generator.run(alerts)` function.

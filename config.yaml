@@ -1,9 +1,8 @@
-alerts_index: aminer-anomaly*
+alert_index: aminer-anomalies
 deltas:
-- 0.5
 - 5
-hosts: localhost:9200
+hosts: localhost
 query_interval: 30
 search_after:
-- 0
+- 1645195312512
 storage: true

@@ -5,32 +5,35 @@ import time
 import json
 import random
 import itertools
-from collections import Counter
 import datetime
-from elasticsearch import Elasticsearch, helpers as es_helpers
-from alertaggregation.preprocessing.objects import Alert
-from alertaggregation.preprocessing import label
-from alertaggregation.clustering import time_delta_group, objects as clustering_objects
-from alertaggregation.similarity import similarity
-from alertaggregation.merging.objects import (MetaAlert, MetaAlertManager, KnowledgeBase, Wildcard, Mergelist)
 import yaml
+from collections import Counter
+from elasticsearch import Elasticsearch, helpers as es_helpers
+from elasticsearch.exceptions import NotFoundError
+#
+from alertaggregation.preprocessing.objects import Alert
+from alertaggregation.clustering import time_delta_group, objects as clustering_objects
+from alertaggregation.merging.objects import (
+    MetaAlert,
+    MetaAlertManager,
+    KnowledgeBase,
+    Wildcard,
+    Mergelist
+)
 
 
 class AlertEncoder(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, Wildcard):
-            return [-1]
+            return obj.symbol
         elif type(obj) == Mergelist:
-            return str(obj.elements)
-        elif type(obj) == list:
-            return str(obj)
+            return obj.elements
         else:
-            return str(obj)
+            return obj
         return super().default(self, obj)
 
 
 class MetaAlertGenerator(Elasticsearch):
-    
     def __init__(self, **config):
         super().__init__(**config)
 
@@ -39,11 +42,10 @@ class MetaAlertGenerator(Elasticsearch):
                 "network failure or the elasticseach instance is not running.")
 
         self.config_keys = config.keys()
-        if "alerts_index" not in self.config_keys:
+        if "alert_index" not in self.config_keys:
             raise ValueError("[x] Elasticsearch index required.")
     
         self.config = config
-        self.local = False
         self.storage = self.config.get('storage', True) # erkennen vs generieren modus
         self.query_size = 1000
         self.keep_alive = "2m"
@@ -58,18 +60,15 @@ class MetaAlertGenerator(Elasticsearch):
                 }
             }
         }
-        
-        if "local" in self.config_keys:
-            self.local = self.config['local']
 
         self.daily_tag = "{:02d}.{:02d}.{:02d}".format(self.utcnow.year, self.utcnow.month, self.utcnow.day)
-        self.alerts_index = self.config.get('alerts_index')
-        self.g_alerts_base_index = "alerts-"
-        self.g_alert_groups_base_index = "alert-groups-"
-        self.g_meta_alerts_base_index = "meta-alerts-"
-        self.g_alerts_index = self.g_alerts_base_index + '*'
+        self.alert_index = self.config.get('alert_index')
+        self.g_alerts_base_index = "generator-alerts-"
+        self.g_alert_groups_base_index = "generator-alert-groups-"
+        self.g_meta_alerts_base_index = "generator-meta-alerts-"
+        self.g_alert_index = self.g_alerts_base_index + '*'
         self.g_alert_groups_index = self.g_alert_groups_base_index + '*'
-        self.g_meta_alerts_index = self.g_meta_alerts_base_index + '*'
+        self.g_meta_alert_index = self.g_meta_alerts_base_index + '*'
         self.g_alerts_daily_index = self.g_alerts_base_index + self.daily_tag
         self.g_alert_groups_daily_index = self.g_alert_groups_base_index + self.daily_tag
         self.g_meta_alerts_daily_index = self.g_meta_alerts_base_index + self.daily_tag
@@ -80,11 +79,10 @@ class MetaAlertGenerator(Elasticsearch):
             if not isinstance(self.alerts_search_after, list):
                 raise ValueError("[x] search_after parameters should be in a list (timestamp @ index 0)")
 
-        self.prev_alerts_search_after = self.alerts_search_after
         self.query_interval = self.config.get('query_interval', 30)
-        alerts_index_exists = self.indices.exists(self.alerts_index)
-        if not alerts_index_exists:
-            raise ValueError("[x] Index {} does not exist".format(self.alerts_index))
+        alert_index_exists = self.indices.exists(index=self.alert_index)
+        if not alert_index_exists:
+            raise ValueError("[x] Index {} does not exist".format(self.alert_index))
 
         # aggregate-config
         self.noise = self.config.get('noise', 0.0)
@@ -100,43 +98,54 @@ class MetaAlertGenerator(Elasticsearch):
         self.w = self.config.get('w', {'timestamp': 0, 'Timestamp': 0, 'timestamps': 0, 'Timestamps': 0}) # Attribute weights used in alert similarity computation. It is recommended to set the weights of timestamps to 0.
         if self.min_alert_match_similarity is None:
             self.min_alert_match_similarity = self.threshold
+            
         # define kbase and manager
         self.kb = KnowledgeBase(self.max_groups_per_meta_alert, self.queue_strategy)
         self.manager = MetaAlertManager(self.kb)
-        # self.indices.create(index=self.g_meta_alerts_daily_index, ignore=400) # Ignore IndexAlreadyExistsException
-        # self.indices.create(index=self.g_alerts_daily_index, ignore=400)
         self.cached_groups = {}
         self.running = True
         self.has_processed = False
         self.frozen_timestamp = None
 
-        meta_alerts = self.scroll_all(self.g_meta_alerts_index)
+        meta_alerts = self.scroll_all(self.g_meta_alert_index)
         if meta_alerts:
             self.set_last_id(meta_alerts, MetaAlert)
             self.update_manager(meta_alerts) # update meta-alert manager ONLY ONCE on start
 
         alert_groups = self.scroll_all(self.g_alert_groups_index)
+
         if alert_groups:
             self.set_last_id(alert_groups, clustering_objects.Group)
             self.update_kb(alert_groups)
+    
 
+    def has_index_data(self, index):
+        try:
+            response = self.search(index=index, query={"match_all": {}})
+            hits = response['hits']['hits']
+            return len(hits)
+        except NotFoundError:
+            self.printout(f"Index {index} does not exist yet")
 
-        if not self.local:   
+    def run(self, local_alerts=None):
+        if local_alerts:
+            self.generate_from_local(local_alerts)
+        else:
             while self.running:
                 alerts = self.fetch_alerts()
-                self.frozen_timestamp = self.timestamp
+                self.frozen_timestamp = datetime.datetime.now()
                 delta_groups = {}
 
                 if alerts: 
                     delta_groups = self.group_alerts(alerts)
                 else: 
-                    self.printout(f"No new alerts")
+                    self.printout(f"No alerts")
 
                 self.process_and_save(delta_groups)
                 self.has_processed = True
                 self.printout(f"Sleeping {self.query_interval} seconds b4 the next query...")
                 time.sleep(int(self.query_interval))
-                
+            
 
     def process_and_save(self, delta_groups):
         if delta_groups and delta_groups.values():
@@ -156,6 +165,7 @@ class MetaAlertGenerator(Elasticsearch):
                 }
             } for delta, groups in self.kb.delta_dict.items() for group in groups for alert in group.alerts]
 
+            
             self.g_alert_groups = [{
                 '_index': self.g_alert_groups_daily_index,
                 '_source': {
@@ -198,9 +208,9 @@ class MetaAlertGenerator(Elasticsearch):
             if self.storage:
                 self.save_stats()
                 # delete old alerts, alert-groups, meta-alerts and save the new/updated ones
-                self.delete_by_query(index=self.g_alerts_index, body={"query": {"match_all": {}}})
+                self.delete_by_query(index=self.g_alert_index, body={"query": {"match_all": {}}})
                 self.delete_by_query(index=self.g_alert_groups_index, body={"query": {"match_all": {}}})
-                self.delete_by_query(index=self.g_meta_alerts_index, body={"query": {"match_all": {}}})
+                self.delete_by_query(index=self.g_meta_alert_index, body={"query": {"match_all": {}}})
                 time.sleep(1)
                 self.save_bulk(self.g_alerts, self.g_alerts_daily_index)
                 self.save_bulk(self.g_alert_groups, self.g_alert_groups_daily_index)
@@ -212,14 +222,21 @@ class MetaAlertGenerator(Elasticsearch):
             with open('config.yaml', 'w+') as f: yaml.dump(self.config, f)
 
     def fetch_alerts(self):
-        index_exists = self.indices.exists(self.alerts_index)
-        if index_exists:
-            self.printout(f"Querying alerts from ES using search_after params: {self.alerts_search_after}")
-            pit_id = self.open_point_in_time(self.alerts_index, keep_alive=self.keep_alive)['id']
+        self.printout(
+            f"Querying alerts using search_after params: {self.alerts_search_after}"
+        )
+        
+        if self.has_index_data(self.alert_index):
+        
+            pit_id = self.open_point_in_time(
+                index=self.alert_index, keep_alive=self.keep_alive
+            )['id']
+            
             pit = {
                 "id": pit_id,
                 "keep_alive": self.keep_alive
             }
+            
             query_body = {
                 "query": self.query,
                 "pit": pit,
@@ -229,7 +246,7 @@ class MetaAlertGenerator(Elasticsearch):
             
             _source_excludes = ["@version", "*.@logtimestamp"]
             # no need to specify index when using pit
-            data = self.search(size=self.query_size, _source_excludes=_source_excludes, body=query_body) 
+            data = self.search(size=self.query_size, _source_excludes=_source_excludes, **query_body) 
 
             pit_id = data['pit_id']
             query_size = len(data['hits']['hits'])
@@ -243,7 +260,7 @@ class MetaAlertGenerator(Elasticsearch):
                     self.alerts_search_after = hits[-1]['sort']
 
                 # re-search with new pit and search_after params
-                data = self.search(size=self.query_size, _source_excludes=_source_excludes, body={
+                data = self.search(size=self.query_size, _source_excludes=_source_excludes, **{
                     "query": self.query,
                     "pit": {'id': pit_id},
                     "search_after": self.alerts_search_after,
@@ -257,11 +274,11 @@ class MetaAlertGenerator(Elasticsearch):
 
             pit_closed = self.close_point_in_time({"id": pit_id})
             return hits
-
+    
+    
     def scroll_all(self, index): 
-        index_exists = self.indices.exists(index)
         hits = []
-        if index_exists:
+        if self.has_index_data(index=index):
             data = self.search(
                 index=index, 
                 scroll=self.keep_alive,
@@ -288,7 +305,7 @@ class MetaAlertGenerator(Elasticsearch):
                     hits.extend(data['hits']['hits'])
                     qcounter += 1
 
-                self.clear_scroll({"scroll_id": scroll_id})
+                self.clear_scroll(**{"scroll_id": scroll_id})
         self.printout(f"Found {len(hits)} existing objects")
         return hits
 
@@ -322,48 +339,52 @@ class MetaAlertGenerator(Elasticsearch):
                     for meta_alert in meta_alerts:
                         if meta_alert.id == group["meta_alert_id"]:
                             ma_obj = meta_alert
+
                 group_obj.meta_alert = ma_obj
                 self.kb.add_group_delta(group_obj, group_obj.delta)
 
     def update_manager(self, meta_alerts): 
         # add es meta_alerts to the manager
-        if meta_alerts:               
-            manager_meta_alerts = {}
-            for meta_alert in meta_alerts:
-                if '_source' in meta_alert.keys():
-                    meta_alert = meta_alert['_source']
-                ma_obj = MetaAlert(self.manager)
-                ma_obj.id = meta_alert['id']
+        manager_meta_alerts = {}
+        for meta_alert in meta_alerts:
+            
+            if '_source' in meta_alert.keys():
+                meta_alert = meta_alert['_source']
 
-                group_alerts = []
-                # decode wildcard and mergelist!
-                for alert in meta_alert['alert_group']:
-                    alert = self.deserialize_alert(alert['alert'])
-                    alert = Alert(alert)
-                    alert.meta_alerts_id.append(ma_obj.id)
-                    group_alerts.append(alert)
+            ma_obj = MetaAlert(self.manager)
+            ma_obj.id = meta_alert['id']
 
-                group = clustering_objects.Group()
-                group.add_to_group(group_alerts)
-                group.create_bag_of_alerts(
-                    self.min_alert_match_similarity, 
-                    max_val_limit=self.max_val_limit, 
-                    min_key_occurrence=self.min_key_occurrence, 
-                    min_val_occurrence=self.min_val_occurrence
-                )
-                # group.meta_alert = ma_obj
-                ma_obj.alert_group = group
-                delta = meta_alert['delta']
-                if delta in manager_meta_alerts:
-                    manager_meta_alerts[delta].append(ma_obj)
-                else:
-                    manager_meta_alerts[delta] = [ma_obj]
-                # self.kb.add_group_delta(group, delta)
+            group_alerts = []
+            # decode wildcard and mergelist!
+            for alert in meta_alert['alert_group']:
+                alert = self.deserialize_alert(alert['alert'])
+                alert = Alert(alert)
+                alert.meta_alerts_id.append(ma_obj.id)
+                group_alerts.append(alert)
 
-            self.manager.meta_alerts = manager_meta_alerts
-            if manager_meta_alerts.keys():
-                self.printout(f"Meta-Alert Manager updated deltas {list(manager_meta_alerts.keys())}")
-          
+            group = clustering_objects.Group()
+            group.add_to_group(group_alerts)
+            group.create_bag_of_alerts(
+                self.min_alert_match_similarity, 
+                max_val_limit=self.max_val_limit, 
+                min_key_occurrence=self.min_key_occurrence, 
+                min_val_occurrence=self.min_val_occurrence
+            )
+            # group.meta_alert = ma_obj
+            ma_obj.alert_group = group
+            delta = meta_alert['delta']
+            if delta in manager_meta_alerts:
+                manager_meta_alerts[delta].append(ma_obj)
+            else:
+                manager_meta_alerts[delta] = [ma_obj]
+            # self.kb.add_group_delta(group, delta)
+
+        self.manager.meta_alerts = manager_meta_alerts
+        if manager_meta_alerts.keys():
+            self.printout(
+                f"Meta-Alert Manager updated deltas {list(manager_meta_alerts.keys())}"
+            )
+        
     def get_meta_alerts_json(self):
         g_meta_alerts = []
         for delta, meta_alerts in self.manager.meta_alerts.items():
@@ -540,14 +561,16 @@ class MetaAlertGenerator(Elasticsearch):
 
     def save_stats(self):
         index = 'generator-stats-' + self.daily_tag
+        self.indices.create(index=index, ignore=400)
+
         alert_count = len(self.g_alerts)
         group_count = len(self.g_alert_groups)
         meta_count = len(self.g_meta_alerts)
-        index_exists = self.indices.exists('generator-stats*')
-        if index_exists:
-            data = self.search(index=index, body={
+
+        if self.has_index_data('generator-stats*'):
+            data = self.search(index=index, **{
                 "size": 1,
-                "sort": {"@timestamp": "desc"},
+                # "sort": {"@timestamp": "desc"},
                 "query": {"match_all": {}},
             })
 
@@ -564,7 +587,7 @@ class MetaAlertGenerator(Elasticsearch):
             'group_count': group_count,
             'meta_count': meta_count
         }
-        self.index(index, body)
+        self.index(index=index, document=body)
 
     def delete_redundant_meta_alerts(self):
         if self.meta_alert_es_ids:
@@ -592,18 +615,13 @@ class MetaAlertGenerator(Elasticsearch):
                 if isinstance(v, dict):
                     loop_dict(v)
                 else:
-                    if isinstance(v, str):
+                    if isinstance(v, str) and '§' in v:
                         wc = Wildcard()
                         wc.symbol = v
                         alert[k] = wc
                     elif isinstance(v, list):
-                        if v[0] == -1:
-                            wc = Wildcard()
-                            wc.symbol = v
-                            alert[k] = wc
-                        else:
-                            ml = Mergelist(v)
-                            alert[k] = ml
+                        ml = Mergelist(v)
+                        alert[k] = ml
         loop_dict(alert)
         return alert
 
@@ -620,7 +638,7 @@ class MetaAlertGenerator(Elasticsearch):
 
     def set_last_group_id(self):
         last_group_id = None
-        index_exists = self.indices.exists(self.g_alert_groups_index)
+        index_exists = self.indices.exists(index=self.g_alert_groups_index)
         if index_exists:
             data = self.search(
                 index=self.g_alert_groups_index, 
@@ -648,7 +666,15 @@ class MetaAlertGenerator(Elasticsearch):
         pass
 
     def generate_from_local(self, alerts):
-        pass
+        self.frozen_timestamp = datetime.datetime.now()
+        delta_groups = {}
+        if alerts: 
+            delta_groups = self.group_alerts(alerts)
+        else: 
+            self.printout(f"No new alerts")
+
+        self.process_and_save(delta_groups)
+
 
     @property
     def connected(self):
@@ -677,3 +703,10 @@ if __name__ == "__main__":
         print("[INFO] -- config.yml cannot be found. Using defaults")
 
     g = MetaAlertGenerator(**config)
+    g.run()
+    
+    ## if you want to process local aminer anomalies ###
+    # with open ('logs.txt') as fh:
+    #     alerts = fh.readlines()
+    #     alerts = [json.loads(alert) for alert in alerts if 'AnalysisComponentName' in alert]
+    #     g.run(alerts)
