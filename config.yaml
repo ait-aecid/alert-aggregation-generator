@@ -4,5 +4,8 @@ deltas:
 hosts: localhost
 query_interval: 30
 search_after:
-- 1645195312512
+- 0
 storage: true
+# http_auth: ['elastic', 'changeme']
+# scheme: 'https'
+# port: 443

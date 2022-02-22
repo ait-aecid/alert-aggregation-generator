@@ -21,6 +21,13 @@ The `config.yaml` file contains the configuration variables for the generator an
 - storage: True => Save generated meta-alerts to elasticsearch; False => only display
 - deltas: alertaggregation parameter
 
+Additionally, you can add any of the parameters accepted by the `elasticsearch-py` library. The most important of these are:
+
+- http_auth: ['elastic', 'changeme']
+- scheme: 'https'
+- port: 443
+
+
 ## How the generator works
 
 After running `generator.py`, the generator queries for aminer anomalies in the given elasticsearch instance. If it does not find anything, it waits a defined period (query_interval) and then queries again. When it find anomalies, it processes them to generate alert-groups and meta-alerts.
