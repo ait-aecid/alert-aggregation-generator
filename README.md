@@ -41,3 +41,4 @@ It is important that the index of AMiner anomalies *not* begin with _alert-_ or 
 * alerts-*
 * alert-groups-*
 * meta-alerts-*
+* generator-stats*
