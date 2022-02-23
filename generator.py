@@ -63,9 +63,9 @@ class MetaAlertGenerator(Elasticsearch):
 
         self.daily_tag = "{:02d}.{:02d}.{:02d}".format(self.utcnow.year, self.utcnow.month, self.utcnow.day)
         self.alert_index = self.config.get('alert_index')
-        self.g_alerts_base_index = "generator-alerts-"
-        self.g_alert_groups_base_index = "generator-alert-groups-"
-        self.g_meta_alerts_base_index = "generator-meta-alerts-"
+        self.g_alerts_base_index = "alerts-"
+        self.g_alert_groups_base_index = "alert-groups-"
+        self.g_meta_alerts_base_index = "meta-alerts-"
         self.g_alert_index = self.g_alerts_base_index + '*'
         self.g_alert_groups_index = self.g_alert_groups_base_index + '*'
         self.g_meta_alert_index = self.g_meta_alerts_base_index + '*'

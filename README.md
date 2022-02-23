@@ -33,3 +33,11 @@ Additionally, you can add any of the parameters accepted by the `elasticsearch-p
 After running `generator.py`, the generator queries for aminer anomalies in the given elasticsearch instance. If it does not find anything, it waits a defined period (query_interval) and then queries again. When it find anomalies, it processes them to generate alert-groups and meta-alerts.
 
 In case you have local anomalies (e.g., in a file), you can process them too by putting them as a JSON list in the `generator.run(alerts)` function.
+
+## Note
+
+It is important that the index of AMiner anomalies *not* begin with _alert-_ or be among the following since they are reserved for the generator:
+
+* alerts-*
+* alert-groups-*
+* meta-alerts-*
