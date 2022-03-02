@@ -363,6 +363,9 @@ class MetaAlertGenerator(Elasticsearch):
                 bag_of_alerts[alert_obj] = (min_freq, max_freq)
                 merge_seq.append(alert_obj)
                 for i in range(int(min_freq + (max_freq - min_freq) / 2)):
+                    alert_des = self.deserialize_alert(alert['alert'])
+                    alert_obj = Alert(alert_des)
+                    alert_obj.meta_alerts_id.append(ma_obj.id)
                     group_alerts.append(alert_obj)
 
             group = clustering_objects.Group()
