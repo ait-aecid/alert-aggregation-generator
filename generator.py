@@ -7,6 +7,7 @@ import random
 import itertools
 import datetime
 import yaml
+import pytz
 from collections import Counter
 from elasticsearch import Elasticsearch, helpers as es_helpers
 from elasticsearch.exceptions import NotFoundError
@@ -135,12 +136,10 @@ class MetaAlertGenerator(Elasticsearch):
                 alerts = self.fetch_alerts()
                 self.frozen_timestamp = datetime.datetime.now()
                 delta_groups = {}
-
                 if alerts: 
                     delta_groups = self.group_alerts(alerts)
                 else: 
                     self.printout(f"No alerts")
-
                 self.process_and_save(delta_groups)
                 self.has_processed = True
                 self.printout(f"Sleeping {self.query_interval} seconds b4 the next query...")
@@ -152,11 +151,10 @@ class MetaAlertGenerator(Elasticsearch):
             self.generate_meta_alerts(delta_groups)
             # get generated alerts, alert-groups and meta-alerts
             alert_counter = itertools.count()
-            
             self.g_alerts = [{
                 '_index': self.g_alerts_daily_index,
                 '_source': {
-                    "@timestamp": self.frozen_timestamp,#alert.d.get('@timestamp'),
+                    "@timestamp": datetime.datetime.fromtimestamp(int(float(alert.d['LogData']['Timestamps'][0] if isinstance(alert.d['LogData']['Timestamps'], list) else alert.d['LogData']['Timestamps'].elements[0])), pytz.utc), # self.frozen_timestamp, #alert.d.get('@timestamp'),
                     "id": next(alert_counter),
                     "d": self.serialize_alert(alert),
                     "delta": delta,
@@ -165,7 +163,6 @@ class MetaAlertGenerator(Elasticsearch):
                 }
             } for delta, groups in self.kb.delta_dict.items() for group in groups for alert in group.alerts]
 
-            
             self.g_alert_groups = [{
                 '_index': self.g_alert_groups_daily_index,
                 '_source': {
@@ -347,7 +344,6 @@ class MetaAlertGenerator(Elasticsearch):
         # add es meta_alerts to the manager
         manager_meta_alerts = {}
         for meta_alert in meta_alerts:
-            
             if '_source' in meta_alert.keys():
                 meta_alert = meta_alert['_source']
 
@@ -355,21 +351,30 @@ class MetaAlertGenerator(Elasticsearch):
             ma_obj.id = meta_alert['id']
 
             group_alerts = []
+            bag_of_alerts = {}
+            merge_seq = []
             # decode wildcard and mergelist!
             for alert in meta_alert['alert_group']:
-                alert = self.deserialize_alert(alert['alert'])
-                alert = Alert(alert)
-                alert.meta_alerts_id.append(ma_obj.id)
-                group_alerts.append(alert)
+                min_freq = int(alert['min_frequency'])
+                max_freq = int(alert['max_frequency'])
+                alert_des = self.deserialize_alert(alert['alert'])
+                alert_obj = Alert(alert_des)
+                alert_obj.meta_alerts_id.append(ma_obj.id)
+                bag_of_alerts[alert_obj] = (min_freq, max_freq)
+                merge_seq.append(alert_obj)
+                for i in range(int(min_freq + (max_freq - min_freq) / 2)):
+                    group_alerts.append(alert_obj)
 
             group = clustering_objects.Group()
             group.add_to_group(group_alerts)
-            group.create_bag_of_alerts(
-                self.min_alert_match_similarity, 
-                max_val_limit=self.max_val_limit, 
-                min_key_occurrence=self.min_key_occurrence, 
-                min_val_occurrence=self.min_val_occurrence
-            )
+            group.bag_of_alerts = bag_of_alerts
+            group.merge_seq = merge_seq
+            #group.create_bag_of_alerts(
+            #    self.min_alert_match_similarity, 
+            #    max_val_limit=self.max_val_limit, 
+            #    min_key_occurrence=self.min_key_occurrence, 
+            #    min_val_occurrence=self.min_val_occurrence
+            #)
             # group.meta_alert = ma_obj
             ma_obj.alert_group = group
             delta = meta_alert['delta']
@@ -497,6 +502,7 @@ class MetaAlertGenerator(Elasticsearch):
                 # cache last group per each delta
                 self.cached_groups[delta] = groups.pop()
                 delta_groups[delta] = groups
+
         return delta_groups
 
     def generate_meta_alerts(self, delta_groups):
