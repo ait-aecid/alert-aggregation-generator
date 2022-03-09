@@ -97,6 +97,7 @@ class MetaAlertGenerator(Elasticsearch):
         self.max_groups_per_meta_alert = self.config.get('max_groups_per_meta_alert', 25) # Maximum queue size [1, inf]. Set to None for unlimited queue size.
         self.queue_strategy = self.config.get('queue_strategy', 'logarithmic') # Queue storage strategy, supported strategies are 'linear' and 'logarithmic'.
         self.w = self.config.get('w', {'timestamp': 0, 'Timestamp': 0, 'timestamps': 0, 'Timestamps': 0}) # Attribute weights used in alert similarity computation. It is recommended to set the weights of timestamps to 0.
+        self.regenerate_meta_alerts_after_loading = True
         if self.min_alert_match_similarity is None:
             self.min_alert_match_similarity = self.threshold
             
@@ -118,7 +119,24 @@ class MetaAlertGenerator(Elasticsearch):
         if alert_groups:
             self.set_last_id(alert_groups, clustering_objects.Group)
             self.update_kb(alert_groups)
-    
+
+        if self.regenerate_meta_alerts_after_loading is True:
+            # This will merge the meta alerts from all allocated groups and overwrite the default
+            self.regenerate_meta_alerts()
+
+    def regenerate_meta_alerts(self):
+        for delta, ma_list in self.manager.meta_alerts.items():
+            for ma in ma_list:
+                ma.update_alert(0.9, # Dummy value to trigger regeneration
+                                min_alert_match_similarity=self.min_alert_match_similarity,
+                                max_val_limit=self.max_val_limit,
+                                min_key_occurrence=self.min_key_occurrence,
+                                min_val_occurrence=self.min_val_occurrence)
+                # Not necessary to create bag of alerts since merging of alert bags already done as part of update_alert
+                #ma.alert_group.create_bag_of_alerts(threshold=self.min_alert_match_similarity,
+                #                                    max_val_limit=self.max_val_limit,
+                #                                    min_key_occurrence=self.min_key_occurrence,
+                #                                    min_val_occurrence=self.min_val_occurrence)
 
     def has_index_data(self, index):
         try:
@@ -339,6 +357,7 @@ class MetaAlertGenerator(Elasticsearch):
 
                 group_obj.meta_alert = ma_obj
                 self.kb.add_group_delta(group_obj, group_obj.delta)
+                self.kb.add_group_meta_alert(group_obj, ma_obj)
 
     def update_manager(self, meta_alerts): 
         # add es meta_alerts to the manager
