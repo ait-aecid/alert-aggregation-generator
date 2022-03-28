@@ -34,6 +34,22 @@ After running `generator.py`, the generator queries for aminer anomalies in the 
 
 In case you have local anomalies (e.g., in a file), you can process them too by putting them as a JSON list in the `generator.run(alerts)` function.
 
+## Docker
+
+It is also possible to run the alert-aggregation-generator inside a container.
+
+Build the container:
+
+```
+$ docker build -t aecid/aag .
+```
+
+Run the container:
+
+```
+$ docker run -it -d --restart unless-stopped -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies aecid/aag
+```
+
 ## Note
 
 It is important that the index of AMiner anomalies *not* begin with _alert-_ or be among the following since they are reserved for the generator:
