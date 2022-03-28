@@ -2,7 +2,8 @@
 # docker build -t aecid/aag .
 #
 # Run the container and pass the SERVERURL as an environment-variable:
-# docker run -it --rm -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies aecid/aag
+# docker run -it -d --restart unless-stopped -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies aecid/aag
+# 
 
 FROM python:latest
 LABEL maintainer="wolfgang.hotwagner@ait.ac.at"
