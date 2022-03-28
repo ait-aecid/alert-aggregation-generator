@@ -8,6 +8,7 @@ import itertools
 import datetime
 import yaml
 import pytz
+import os
 from collections import Counter
 from elasticsearch import Elasticsearch, helpers as es_helpers
 from elasticsearch.exceptions import NotFoundError
@@ -729,6 +730,11 @@ if __name__ == "__main__":
             config = yaml.load(f, Loader=yaml.FullLoader)
     except FileNotFoundError as e:
         print("[INFO] -- config.yml cannot be found. Using defaults")
+
+    if os.environ.get('ELASTIC_SERVER'):
+        config["hosts"] = os.environ.get('ELASTIC_SERVER')
+    if os.environ.get('ELASTIC_INDEX'):
+        config["alert_index"] = os.environ.get('ELASTIC_INDEX')
 
     g = MetaAlertGenerator(**config)
     g.run()
