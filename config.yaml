@@ -1,6 +1,7 @@
 alert_index: aminer-anomalies
 deltas:
 - 5
+threshold: 0.3
 hosts: localhost
 query_interval: 30
 search_after:
