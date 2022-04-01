@@ -96,7 +96,7 @@ class MetaAlertGenerator(Elasticsearch):
         self.alignment_weight = self.config.get('alignment_weight', 0.1) # Influence of alignment on group similarity [0, 1].
         self.max_groups_per_meta_alert = self.config.get('max_groups_per_meta_alert', 25) # Maximum queue size [1, inf]. Set to None for unlimited queue size.
         self.queue_strategy = self.config.get('queue_strategy', 'logarithmic') # Queue storage strategy, supported strategies are 'linear' and 'logarithmic'.
-        self.w = self.config.get('w', {'timestamp': 0, 'Timestamp': 0, 'timestamps': 0, 'Timestamps': 0}) # Attribute weights used in alert similarity computation. It is recommended to set the weights of timestamps to 0.
+        self.w = self.config.get('w', {'timestamp': 0, 'Timestamp': 0, 'timestamps': 0, 'Timestamps': 0, 'AnnotatedMatchElement': 0}) # Attribute weights used in alert similarity computation. It is recommended to set the weights of timestamps to 0.
         self.regenerate_meta_alerts_after_loading = True
         if self.min_alert_match_similarity is None:
             self.min_alert_match_similarity = self.threshold
