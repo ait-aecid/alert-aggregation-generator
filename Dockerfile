@@ -2,7 +2,7 @@
 # docker build -t aecid/alert-aggregation-generator .
 #
 # Run the container and pass the SERVERURL as an environment-variable:
-# docker run -it -d --restart unless-stopped -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies aecid/alert-aggregation-generator
+# docker run -it -d --restart unless-stopped -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies -e SIM_THRESHOLD=0.3 aecid/alert-aggregation-generator
 # 
 
 FROM python:latest
