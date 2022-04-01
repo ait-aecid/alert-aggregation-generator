@@ -735,6 +735,8 @@ if __name__ == "__main__":
         config["hosts"] = os.environ.get('ELASTIC_SERVER')
     if os.environ.get('ELASTIC_INDEX'):
         config["alert_index"] = os.environ.get('ELASTIC_INDEX')
+    if os.environ.get('SIM_THRESHOLD'):
+        config["threshold"] = os.environ.get('SIM_THRESHOLD')
 
     g = MetaAlertGenerator(**config)
     g.run()

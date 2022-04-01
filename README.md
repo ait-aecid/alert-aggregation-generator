@@ -47,7 +47,7 @@ $ docker build -t aecid/aag .
 Run the container:
 
 ```
-$ docker run -it -d --restart unless-stopped -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies aecid/aag
+$ docker run -it -d --restart unless-stopped -e ELASTIC_SERVER=http://172.17.0.2:9000 -e ELASTIC_INDEX=aminer-anomalies -e SIM_THRESHOLD=0.3 aecid/aag
 ```
 
 ## Note
