@@ -9,6 +9,7 @@ import datetime
 import yaml
 import pytz
 import os
+import ast
 from collections import Counter
 from elasticsearch import Elasticsearch, helpers as es_helpers
 from elasticsearch.exceptions import NotFoundError
@@ -737,6 +738,8 @@ if __name__ == "__main__":
         config["alert_index"] = os.environ.get('ELASTIC_INDEX')
     if os.environ.get('SIM_THRESHOLD'):
         config["threshold"] = os.environ.get('SIM_THRESHOLD')
+    if os.environ.get('DELTA_SECONDS'):
+        config["deltas"] = ast.literal_eval(os.environ.get('DELTA_SECONDS'))
 
     g = MetaAlertGenerator(**config)
     g.run()
