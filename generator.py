@@ -122,7 +122,7 @@ class MetaAlertGenerator(Elasticsearch):
             self.set_last_id(alert_groups, clustering_objects.Group)
             self.update_kb(alert_groups)
 
-        if self.regenerate_meta_alerts_after_loading is True:
+        if alert_groups and self.regenerate_meta_alerts_after_loading is True:
             # This will merge the meta alerts from all allocated groups and overwrite the default
             self.regenerate_meta_alerts()
 
