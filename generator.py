@@ -232,7 +232,8 @@ class MetaAlertGenerator(Elasticsearch):
                 self.save_bulk(self.g_alerts, self.g_alerts_daily_index)
                 for g_alert_group in self.g_alert_groups:
                     self.save_bulk([g_alert_group], self.g_alert_groups_daily_index)
-                self.save_bulk(self.g_meta_alerts, self.g_meta_alerts_daily_index)
+                for g_meta_alert in self.g_meta_alerts:
+                    self.save_bulk([g_meta_alert], self.g_meta_alerts_daily_index)
             else:
                 self.send_notification()
 
