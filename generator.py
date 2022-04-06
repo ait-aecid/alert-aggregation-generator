@@ -230,7 +230,8 @@ class MetaAlertGenerator(Elasticsearch):
                 self.delete_by_query(index=self.g_meta_alert_index, body={"query": {"match_all": {}}})
                 time.sleep(1)
                 self.save_bulk(self.g_alerts, self.g_alerts_daily_index)
-                self.save_bulk(self.g_alert_groups, self.g_alert_groups_daily_index)
+                for g_alert_group in self.g_alert_groups:
+                    self.save_bulk([g_alert_group], self.g_alert_groups_daily_index)
                 self.save_bulk(self.g_meta_alerts, self.g_meta_alerts_daily_index)
             else:
                 self.send_notification()

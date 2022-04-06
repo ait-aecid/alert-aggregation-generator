@@ -20,5 +20,5 @@ jobs:
           PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
           DOCKERFILE: "Dockerfile"
           IMAGE_NAME: "aitaecid/alert-aggregation-generator"
-          TAG_NAME: "v0.9.4"
+          TAG_NAME: "v0.9.5"
           LATEST: "true"
